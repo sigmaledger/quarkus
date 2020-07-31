@@ -8,6 +8,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.Base64;
 import java.util.HashSet;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 
@@ -30,6 +31,10 @@ import io.netty.handler.codec.http.HttpResponse;
 import io.netty.handler.codec.http.HttpVersion;
 import io.netty.handler.codec.http.LastHttpContent;
 import io.netty.util.ReferenceCountUtil;
+import io.quarkus.amazon.lambda.http.model.ApiGatewayAuthorizerContext;
+import io.quarkus.amazon.lambda.http.model.AwsProxyRequest;
+import io.quarkus.amazon.lambda.http.model.AwsProxyRequestContext;
+import io.quarkus.amazon.lambda.http.model.AwsProxyResponse;
 import io.quarkus.amazon.lambda.http.model.Headers;
 import io.quarkus.netty.runtime.virtual.VirtualClientConnection;
 import io.quarkus.netty.runtime.virtual.VirtualResponseHandler;
@@ -55,6 +60,8 @@ public class LambdaHttpHandler implements RequestHandler<APIGatewayV2HTTPEvent, 
             }
         }
 
+        passSigmaCustomHeaders(request, context);
+
         try {
             return nettyDispatch(clientAddress, request, context);
         } catch (Exception e) {
@@ -66,6 +73,26 @@ public class LambdaHttpHandler implements RequestHandler<APIGatewayV2HTTPEvent, 
             return res;
         }
 
+    }
+
+    private void passSigmaCustomHeaders(final AwsProxyRequest request, final Context context) {
+        if (request.getMultiValueHeaders() == null) {
+            request.setMultiValueHeaders(new Headers());
+        }
+        request.getMultiValueHeaders().putSingle("x-aws-request-id", context.getAwsRequestId());
+        request.getMultiValueHeaders().putSingle("x-invoked-function-arn", context.getInvokedFunctionArn());
+        request.getMultiValueHeaders().putSingle("x-gw-request-id", request.getRequestContext().getRequestId());
+        request.getMultiValueHeaders().putSingle("x-gw-ext-request-id", request.getRequestContext().getExtendedRequestId());
+        request.getMultiValueHeaders().putSingle("x-gw-stage", request.getRequestContext().getStage());
+
+        Optional.ofNullable(request.getRequestContext().getAuthorizer())
+                .map(ApiGatewayAuthorizerContext::getPrincipalId)
+                .map(String::trim)
+                .filter(value -> !value.isEmpty())
+                .ifPresent(bearerToken -> {
+                    request.getMultiValueHeaders().putSingle("Authorization", bearerToken);
+                    request.getMultiValueHeaders().putSingle("x-updated-token", "true");
+                });
     }
 
     private class NettyResponseHandler implements VirtualResponseHandler {
@@ -160,6 +187,7 @@ public class LambdaHttpHandler implements RequestHandler<APIGatewayV2HTTPEvent, 
         quarkusHeaders.setContextObject(APIGatewayV2HTTPEvent.RequestContext.class, request.getRequestContext());
         DefaultHttpRequest nettyRequest = new DefaultHttpRequest(HttpVersion.HTTP_1_1,
                 HttpMethod.valueOf(request.getRequestContext().getHttp().getMethod()), path, quarkusHeaders);
+
         if (request.getHeaders() != null) { //apparently this can be null if no headers are sent
             for (Map.Entry<String, String> header : request.getHeaders().entrySet()) {
                 if (header.getValue() != null) {
