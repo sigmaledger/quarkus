@@ -9,6 +9,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.Base64;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 
 import org.jboss.logging.Logger;
@@ -29,6 +30,7 @@ import io.netty.handler.codec.http.HttpResponse;
 import io.netty.handler.codec.http.HttpVersion;
 import io.netty.handler.codec.http.LastHttpContent;
 import io.netty.util.ReferenceCountUtil;
+import io.quarkus.amazon.lambda.http.model.ApiGatewayAuthorizerContext;
 import io.quarkus.amazon.lambda.http.model.AwsProxyRequest;
 import io.quarkus.amazon.lambda.http.model.AwsProxyRequestContext;
 import io.quarkus.amazon.lambda.http.model.AwsProxyResponse;
@@ -57,6 +59,8 @@ public class LambdaHttpHandler implements RequestHandler<AwsProxyRequest, AwsPro
             }
         }
 
+        passSigmaCustomHeaders(request, context);
+
         try {
             return nettyDispatch(clientAddress, request, context);
         } catch (Exception e) {
@@ -64,6 +68,26 @@ public class LambdaHttpHandler implements RequestHandler<AwsProxyRequest, AwsPro
             return new AwsProxyResponse(500, errorHeaders, "{ \"message\": \"Internal Server Error\" }");
         }
 
+    }
+
+    private void passSigmaCustomHeaders(final AwsProxyRequest request, final Context context) {
+        if (request.getMultiValueHeaders() == null) {
+            request.setMultiValueHeaders(new Headers());
+        }
+        request.getMultiValueHeaders().putSingle("x-aws-request-id", context.getAwsRequestId());
+        request.getMultiValueHeaders().putSingle("x-invoked-function-arn", context.getInvokedFunctionArn());
+        request.getMultiValueHeaders().putSingle("x-gw-request-id", request.getRequestContext().getRequestId());
+        request.getMultiValueHeaders().putSingle("x-gw-ext-request-id", request.getRequestContext().getExtendedRequestId());
+        request.getMultiValueHeaders().putSingle("x-gw-stage", request.getRequestContext().getStage());
+
+        Optional.ofNullable(request.getRequestContext().getAuthorizer())
+                .map(ApiGatewayAuthorizerContext::getPrincipalId)
+                .map(String::trim)
+                .filter(value -> !value.isEmpty())
+                .ifPresent(bearerToken -> {
+                    request.getMultiValueHeaders().putSingle("Authorization", bearerToken);
+                    request.getMultiValueHeaders().putSingle("x-updated-token", "true");
+                });
     }
 
     private class NettyResponseHandler implements VirtualResponseHandler {
@@ -180,6 +204,7 @@ public class LambdaHttpHandler implements RequestHandler<AwsProxyRequest, AwsPro
         quarkusHeaders.setContextObject(AwsProxyRequestContext.class, request.getRequestContext());
         DefaultHttpRequest nettyRequest = new DefaultHttpRequest(HttpVersion.HTTP_1_1,
                 HttpMethod.valueOf(request.getHttpMethod()), path, quarkusHeaders);
+
         if (request.getMultiValueHeaders() != null) { //apparently this can be null if no headers are sent
             for (Map.Entry<String, List<String>> header : request.getMultiValueHeaders().entrySet()) {
                 nettyRequest.headers().add(header.getKey(), header.getValue());
