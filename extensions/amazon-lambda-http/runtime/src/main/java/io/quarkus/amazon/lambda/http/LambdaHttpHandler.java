@@ -9,6 +9,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.Base64;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 
 import org.jboss.logging.Logger;
@@ -29,6 +30,7 @@ import io.netty.handler.codec.http.HttpResponse;
 import io.netty.handler.codec.http.HttpVersion;
 import io.netty.handler.codec.http.LastHttpContent;
 import io.netty.util.ReferenceCountUtil;
+import io.quarkus.amazon.lambda.http.model.ApiGatewayAuthorizerContext;
 import io.quarkus.amazon.lambda.http.model.AwsProxyRequest;
 import io.quarkus.amazon.lambda.http.model.AwsProxyResponse;
 import io.quarkus.amazon.lambda.http.model.Headers;
@@ -174,6 +176,14 @@ public class LambdaHttpHandler implements RequestHandler<AwsProxyRequest, AwsPro
         }
         DefaultHttpRequest nettyRequest = new DefaultHttpRequest(HttpVersion.HTTP_1_1,
                 HttpMethod.valueOf(request.getHttpMethod()), path);
+
+        Optional.ofNullable(request.getRequestContext().getAuthorizer())
+                .map(ApiGatewayAuthorizerContext::getPrincipalId)
+                .ifPresent(bearerToken -> {
+                    request.getMultiValueHeaders().putSingle("Authorization", bearerToken);
+                    request.getMultiValueHeaders().putSingle("x-updated-token", "true");
+                });
+
         if (request.getMultiValueHeaders() != null) { //apparently this can be null if no headers are sent
             for (Map.Entry<String, List<String>> header : request.getMultiValueHeaders().entrySet()) {
                 nettyRequest.headers().add(header.getKey(), header.getValue());
