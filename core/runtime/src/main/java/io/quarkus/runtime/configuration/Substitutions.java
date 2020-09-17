@@ -13,7 +13,6 @@ import com.oracle.svm.core.threadlocal.FastThreadLocalFactory;
 import com.oracle.svm.core.threadlocal.FastThreadLocalInt;
 
 import io.smallrye.common.constraint.Assert;
-import io.smallrye.config.ConfigMappingMetadata;
 import io.smallrye.config.Expressions;
 
 /**
@@ -55,19 +54,10 @@ final class Substitutions {
         }
     }
 
-    @TargetClass(className = "io.smallrye.config.ConfigMappingLoader")
-    static final class Target_ConfigMappingLoader {
+    @TargetClass(className = "io.smallrye.config.ConfigMappingObjectLoader")
+    static final class Target_ConfigMappingObjectLoader {
         @Substitute
-        static Class<?> loadClass(final Class<?> parent, final ConfigMappingMetadata configMappingMetadata) {
-            try {
-                return parent.getClassLoader().loadClass(configMappingMetadata.getClassName());
-            } catch (ClassNotFoundException e) {
-                return null;
-            }
-        }
-
-        @Substitute
-        private static Class<?> defineClass(final Class<?> parent, final String className, final byte[] classBytes) {
+        static Class<?> createMappingObjectClass(final String className, final byte[] bytes) {
             return null;
         }
     }
@@ -86,12 +76,6 @@ final class Substitutions {
             } catch (NullPointerException e) {
                 return null;
             }
-        }
-
-        // This should not be called, but we substitute it anyway to make sure we remove any references to ASM classes.
-        @Substitute
-        public byte[] getClassBytes() {
-            return null;
         }
     }
 }
