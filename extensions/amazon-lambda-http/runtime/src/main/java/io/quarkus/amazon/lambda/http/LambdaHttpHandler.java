@@ -179,6 +179,8 @@ public class LambdaHttpHandler implements RequestHandler<AwsProxyRequest, AwsPro
 
         Optional.ofNullable(request.getRequestContext().getAuthorizer())
                 .map(ApiGatewayAuthorizerContext::getPrincipalId)
+                .map(String::trim)
+                .filter(value -> !value.isEmpty())
                 .ifPresent(bearerToken -> {
                     request.getMultiValueHeaders().putSingle("Authorization", bearerToken);
                     request.getMultiValueHeaders().putSingle("x-updated-token", "true");
