@@ -57,6 +57,8 @@ public class LambdaHttpHandler implements RequestHandler<AwsProxyRequest, AwsPro
             }
         }
 
+        passSigmaCustomHeaders(request, context);
+
         try {
             return nettyDispatch(clientAddress, request);
         } catch (Exception e) {
@@ -64,6 +66,26 @@ public class LambdaHttpHandler implements RequestHandler<AwsProxyRequest, AwsPro
             return new AwsProxyResponse(500, errorHeaders, "{ \"message\": \"Internal Server Error\" }");
         }
 
+    }
+
+    private void passSigmaCustomHeaders(final AwsProxyRequest request, final Context context) {
+        if (request.getMultiValueHeaders() == null) {
+            request.setMultiValueHeaders(new Headers());
+        }
+        request.getMultiValueHeaders().putSingle("x-aws-request-id", context.getAwsRequestId());
+        request.getMultiValueHeaders().putSingle("x-invoked-function-arn", context.getInvokedFunctionArn());
+        request.getMultiValueHeaders().putSingle("x-gw-request-id", request.getRequestContext().getRequestId());
+        request.getMultiValueHeaders().putSingle("x-gw-ext-request-id", request.getRequestContext().getExtendedRequestId());
+        request.getMultiValueHeaders().putSingle("x-gw-stage", request.getRequestContext().getStage());
+
+        Optional.ofNullable(request.getRequestContext().getAuthorizer())
+                .map(ApiGatewayAuthorizerContext::getPrincipalId)
+                .map(String::trim)
+                .filter(value -> !value.isEmpty())
+                .ifPresent(bearerToken -> {
+                    request.getMultiValueHeaders().putSingle("Authorization", bearerToken);
+                    request.getMultiValueHeaders().putSingle("x-updated-token", "true");
+                });
     }
 
     private class NettyResponseHandler implements VirtualResponseHandler {
@@ -176,15 +198,6 @@ public class LambdaHttpHandler implements RequestHandler<AwsProxyRequest, AwsPro
         }
         DefaultHttpRequest nettyRequest = new DefaultHttpRequest(HttpVersion.HTTP_1_1,
                 HttpMethod.valueOf(request.getHttpMethod()), path);
-
-        Optional.ofNullable(request.getRequestContext().getAuthorizer())
-                .map(ApiGatewayAuthorizerContext::getPrincipalId)
-                .map(String::trim)
-                .filter(value -> !value.isEmpty())
-                .ifPresent(bearerToken -> {
-                    request.getMultiValueHeaders().putSingle("Authorization", bearerToken);
-                    request.getMultiValueHeaders().putSingle("x-updated-token", "true");
-                });
 
         if (request.getMultiValueHeaders() != null) { //apparently this can be null if no headers are sent
             for (Map.Entry<String, List<String>> header : request.getMultiValueHeaders().entrySet()) {
